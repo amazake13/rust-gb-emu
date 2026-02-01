@@ -16,14 +16,32 @@ impl Cpu {
     /// Fetch, decode, and execute one instruction
     /// Returns the number of T-cycles (clock cycles) consumed
     pub fn step(&mut self, bus: &mut Bus) -> u32 {
+        // Handle pending interrupts first
+        let interrupt_cycles = self.handle_interrupts(bus);
+        if interrupt_cycles > 0 {
+            return interrupt_cycles;
+        }
+
         if self.halted {
             // HALT mode: CPU waits for interrupt
             // Still consume cycles
             return 4;
         }
 
+        // Remember if EI was scheduled before this instruction
+        let ei_pending = self.ime_scheduled;
+
         let opcode = self.fetch(bus);
-        self.execute(bus, opcode)
+        let cycles = self.execute(bus, opcode);
+
+        // Apply scheduled IME enable AFTER the instruction executes
+        // (EI has 1 instruction delay)
+        if ei_pending {
+            self.ime = true;
+            self.ime_scheduled = false;
+        }
+
+        cycles
     }
 
     /// Fetch the next byte from PC and increment PC
@@ -46,6 +64,15 @@ impl Cpu {
             // ========== NOP ==========
             // 0x00: NOP - No operation
             0x00 => 4,
+
+            // ========== STOP ==========
+            // 0x10: STOP - Halt CPU & LCD until button pressed
+            // In practice, often used as a 2-byte NOP (0x10 0x00)
+            0x10 => {
+                self.fetch(bus); // Consume the next byte (usually 0x00)
+                // For now, treat as NOP. Real STOP would halt until joypad input.
+                4
+            }
 
             // ========== LD r, n (8-bit immediate) ==========
             // Load 8-bit immediate value into register
@@ -470,8 +497,16 @@ impl Cpu {
             0xF1 => { let v = self.pop(bus); self.regs.set_af(v); 12 }  // POP AF
 
             // ========== Interrupt control ==========
-            0xF3 => { self.ime = false; 4 }  // DI (Disable Interrupts)
-            0xFB => { self.ime = true; 4 }   // EI (Enable Interrupts)
+            0xF3 => {  // DI (Disable Interrupts)
+                self.ime = false;
+                self.ime_scheduled = false;
+                4
+            }
+            0xFB => {  // EI (Enable Interrupts)
+                // EI has a 1 instruction delay - IME is set after the next instruction
+                self.ime_scheduled = true;
+                4
+            }
 
             // ========== HALT ==========
             0x76 => { self.halted = true; 4 }

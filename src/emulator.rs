@@ -43,6 +43,8 @@ impl Emulator {
     /// Execute one CPU instruction
     pub fn step(&mut self) -> u32 {
         let cycles = self.cpu.step(&mut self.bus);
+        // Update timer and other hardware
+        self.bus.tick(cycles);
         self.cycles += cycles as u64;
         cycles
     }

@@ -12,6 +12,8 @@ mod bus;
 mod cartridge;
 mod cpu;
 mod emulator;
+mod interrupts;
+mod timer;
 
 use bus::Bus;
 use cartridge::Cartridge;
@@ -83,18 +85,20 @@ fn run_rom(cart: &Cartridge, debug: bool) {
 
     let mut emu = Emulator::new(cart);
 
-    // Maximum cycles to run (about 10 seconds of emulated time)
-    // 4.194304 MHz * 10 seconds = ~42 million cycles
-    let max_cycles: u64 = 42_000_000;
+    // Maximum cycles to run (about 1200 seconds of emulated time)
+    // 4.194304 MHz * 1200 seconds = ~5 billion cycles
+    let max_cycles: u64 = 5_000_000_000;
 
     let mut last_output_len = 0;
     let mut instructions_executed = 0u64;
 
-    while emu.cycles < max_cycles && !emu.cpu.halted {
+    while emu.cycles < max_cycles {
         if debug && instructions_executed % 100_000 == 0 {
+            let ie = emu.bus.read(0xFFFF);
+            let if_reg = emu.bus.read(0xFF0F);
             println!(
-                "[{:>10} cycles] PC: 0x{:04X}, A: 0x{:02X}, SP: 0x{:04X}",
-                emu.cycles, emu.cpu.regs.pc, emu.cpu.regs.a, emu.cpu.regs.sp
+                "[{:>10} cycles] PC: 0x{:04X}, A: 0x{:02X}, IE: 0x{:02X}, IF: 0x{:02X}, IME: {}, HALT: {}",
+                emu.cycles, emu.cpu.regs.pc, emu.cpu.regs.a, ie, if_reg, emu.cpu.ime, emu.cpu.halted
             );
         }
 
@@ -116,8 +120,8 @@ fn run_rom(cart: &Cartridge, debug: bool) {
         }
 
         // Safety check for infinite loops without output
-        if instructions_executed > 100_000_000 {
-            println!("\n[Timeout: 100M instructions without completion]");
+        if instructions_executed > 500_000_000 {
+            println!("\n[Timeout: 500M instructions without completion]");
             break;
         }
     }

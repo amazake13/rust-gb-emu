@@ -6,3 +6,5 @@ pub mod bus;
 pub mod cartridge;
 pub mod cpu;
 pub mod emulator;
+pub mod interrupts;
+pub mod timer;

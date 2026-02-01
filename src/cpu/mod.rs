@@ -29,6 +29,8 @@ pub struct Cpu {
     pub halted: bool,
     /// Interrupt Master Enable flag
     pub ime: bool,
+    /// IME will be enabled after next instruction (EI delay)
+    pub ime_scheduled: bool,
 }
 
 impl Cpu {
@@ -37,7 +39,48 @@ impl Cpu {
             regs: Registers::new(),
             halted: false,
             ime: false,
+            ime_scheduled: false,
         }
+    }
+
+    /// Handle pending interrupts
+    /// Returns cycles consumed if an interrupt was handled
+    pub fn handle_interrupts(&mut self, bus: &mut crate::bus::Bus) -> u32 {
+        let ie = bus.read(0xFFFF);
+        let if_reg = bus.read(0xFF0F);
+        let pending = ie & if_reg;
+
+        // Wake from HALT if any interrupt is pending (even if IME is false)
+        if pending != 0 && self.halted {
+            self.halted = false;
+        }
+
+        // Only handle interrupt if IME is true
+        if !self.ime {
+            return 0;
+        }
+
+        if let Some((vector, bit)) = crate::interrupts::get_interrupt_vector(ie, if_reg) {
+            // Disable IME
+            self.ime = false;
+
+            // Clear the interrupt flag
+            bus.write(0xFF0F, if_reg & !bit);
+
+            // Push PC onto stack
+            self.regs.sp = self.regs.sp.wrapping_sub(1);
+            bus.write(self.regs.sp, (self.regs.pc >> 8) as u8);
+            self.regs.sp = self.regs.sp.wrapping_sub(1);
+            bus.write(self.regs.sp, (self.regs.pc & 0xFF) as u8);
+
+            // Jump to interrupt vector
+            self.regs.pc = vector;
+
+            // Interrupt handling takes 20 cycles (5 M-cycles)
+            return 20;
+        }
+
+        0
     }
 }
 

@@ -16,6 +16,8 @@
 // 0xFF80-0xFFFE: HRAM (127B) - High RAM (fast access)
 // 0xFFFF: IE Register - Interrupt Enable register
 
+use crate::timer::Timer;
+
 /// Memory Bus - handles all memory read/write operations
 pub struct Bus {
     /// Cartridge ROM (32KB for now, will expand with MBC support)
@@ -36,6 +38,8 @@ pub struct Bus {
     ie: u8,
     /// Serial output buffer (for test ROMs)
     pub serial_output: Vec<u8>,
+    /// Timer
+    pub timer: Timer,
 }
 
 impl Bus {
@@ -50,12 +54,24 @@ impl Bus {
             oam: [0; 0xA0],
             ie: 0,
             serial_output: Vec::new(),
+            timer: Timer::new(),
         }
     }
 
     /// Get serial output as string
     pub fn get_serial_output(&self) -> String {
         String::from_utf8_lossy(&self.serial_output).to_string()
+    }
+
+    /// Update timer and check for interrupts
+    pub fn tick(&mut self, cycles: u32) {
+        self.timer.tick(cycles);
+
+        // Check for timer interrupt
+        if self.timer.take_interrupt() {
+            // Set Timer interrupt flag (bit 2 of IF)
+            self.io[0x0F] |= 0x04;
+        }
     }
 
     /// Load ROM data into memory
@@ -150,10 +166,13 @@ impl Bus {
             0xFF01..=0xFF02 => self.io[offset],
 
             // Timer registers
-            0xFF04..=0xFF07 => self.io[offset],
+            0xFF04 => self.timer.div(),           // DIV
+            0xFF05 => self.timer.tima,            // TIMA
+            0xFF06 => self.timer.tma,             // TMA
+            0xFF07 => self.timer.tac | 0xF8,      // TAC (upper bits return 1)
 
             // Interrupt Flag (IF)
-            0xFF0F => self.io[offset],
+            0xFF0F => self.io[offset] | 0xE0,     // Upper bits always 1
 
             // Sound registers - stub for now
             0xFF10..=0xFF3F => self.io[offset],
@@ -182,8 +201,14 @@ impl Bus {
                 }
             }
 
-            // DIV register - writing any value resets it to 0
-            0xFF04 => self.io[offset] = 0,
+            // Timer registers
+            0xFF04 => self.timer.reset_div(),     // DIV - any write resets
+            0xFF05 => self.timer.tima = value,    // TIMA
+            0xFF06 => self.timer.tma = value,     // TMA
+            0xFF07 => self.timer.write_tac(value), // TAC
+
+            // Interrupt Flag (IF)
+            0xFF0F => self.io[offset] = value & 0x1F,  // Only lower 5 bits
 
             // Normal I/O write
             _ => self.io[offset] = value,
