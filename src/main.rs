@@ -13,13 +13,20 @@ mod cartridge;
 mod cpu;
 mod emulator;
 mod interrupts;
+mod joypad;
+mod mbc;
+mod ppu;
 mod timer;
 
 use bus::Bus;
 use cartridge::Cartridge;
 use cpu::Cpu;
 use emulator::Emulator;
+use joypad::Button;
+use minifb::{Key, Window, WindowOptions};
+use ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use std::env;
+use std::time::Instant;
 
 fn main() {
     println!("Game Boy Emulator");
@@ -28,8 +35,9 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        println!("Usage: {} <rom_file> [--run] [--debug]", args[0]);
-        println!("  --run    Execute the ROM (default: just show info)");
+        println!("Usage: {} <rom_file> [--run] [--gui] [--debug]", args[0]);
+        println!("  --run    Execute the ROM (CLI mode, for test ROMs)");
+        println!("  --gui    Execute with graphical display");
         println!("  --debug  Show debug output during execution");
         println!("\nRunning in demo mode...\n");
         run_demo();
@@ -38,6 +46,7 @@ fn main() {
 
     let rom_path = &args[1];
     let run_mode = args.iter().any(|a| a == "--run");
+    let gui_mode = args.iter().any(|a| a == "--gui");
     let debug_mode = args.iter().any(|a| a == "--debug");
 
     match Cartridge::from_file(rom_path) {
@@ -53,11 +62,13 @@ fn main() {
                 if cart.info.checksum_valid { "valid" } else { "INVALID" }
             );
 
-            if run_mode {
+            if gui_mode {
+                run_gui(&cart, debug_mode);
+            } else if run_mode {
                 run_rom(&cart, debug_mode);
             } else {
                 // Just show ROM info and first bytes
-                let bus = Bus::new();
+                let _bus = Bus::new();
                 println!("\nFirst instructions at 0x0100:");
                 for i in 0..16 {
                     let addr = 0x0100 + i;
@@ -69,7 +80,7 @@ fn main() {
                     }
                 }
                 println!();
-                println!("\nUse --run to execute the ROM");
+                println!("\nUse --run for CLI mode or --gui for graphical mode");
             }
         }
         Err(e) => {
@@ -142,6 +153,109 @@ fn run_rom(cart: &Cartridge, debug: bool) {
     } else if emu.test_failed() {
         println!("\n[TEST FAILED]");
     }
+}
+
+/// Game Boy color palette (classic green shades)
+const PALETTE: [u32; 4] = [
+    0x9BBC0F, // Lightest (color 0)
+    0x8BAC0F, // Light (color 1)
+    0x306230, // Dark (color 2)
+    0x0F380F, // Darkest (color 3)
+];
+
+/// Run ROM with graphical display
+fn run_gui(cart: &Cartridge, debug: bool) {
+    println!("\n--- Starting GUI mode ---\n");
+    println!("Controls:");
+    println!("  Arrow keys: D-pad");
+    println!("  Z: A button");
+    println!("  X: B button");
+    println!("  Enter: Start");
+    println!("  Backspace: Select");
+    println!("  Escape: Quit\n");
+
+    let mut emu = Emulator::new(cart);
+
+    // Create window with 3x scale
+    let scale = 3;
+    let mut window = Window::new(
+        &format!("Game Boy - {}", cart.info.title),
+        SCREEN_WIDTH * scale,
+        SCREEN_HEIGHT * scale,
+        WindowOptions {
+            resize: false,
+            scale: minifb::Scale::X1,
+            ..WindowOptions::default()
+        },
+    )
+    .expect("Failed to create window");
+
+    // Target ~60fps (16.67ms per frame)
+    window.set_target_fps(60);
+
+    // Buffer for pixel data (ARGB format)
+    let mut buffer = vec![0u32; SCREEN_WIDTH * SCREEN_HEIGHT * scale * scale];
+
+    // Cycles per frame: 4.194304 MHz / 59.73 fps ≈ 70224 cycles
+    let cycles_per_frame: u64 = 70224;
+
+    let mut frame_count = 0u64;
+    let start_time = Instant::now();
+
+    while window.is_open() && !window.is_key_down(Key::Escape) {
+        // Handle input
+        emu.bus.joypad.set_button(Button::Right, window.is_key_down(Key::Right));
+        emu.bus.joypad.set_button(Button::Left, window.is_key_down(Key::Left));
+        emu.bus.joypad.set_button(Button::Up, window.is_key_down(Key::Up));
+        emu.bus.joypad.set_button(Button::Down, window.is_key_down(Key::Down));
+        emu.bus.joypad.set_button(Button::A, window.is_key_down(Key::Z));
+        emu.bus.joypad.set_button(Button::B, window.is_key_down(Key::X));
+        emu.bus.joypad.set_button(Button::Start, window.is_key_down(Key::Enter));
+        emu.bus.joypad.set_button(Button::Select, window.is_key_down(Key::Backspace));
+
+        // Run emulator for one frame
+        let target_cycles = emu.cycles + cycles_per_frame;
+        while emu.cycles < target_cycles {
+            emu.step();
+        }
+
+        // Convert framebuffer to ARGB and scale
+        for y in 0..SCREEN_HEIGHT {
+            for x in 0..SCREEN_WIDTH {
+                let color_index = emu.bus.ppu.framebuffer[y * SCREEN_WIDTH + x] as usize;
+                let color = PALETTE[color_index & 3];
+
+                // Scale up the pixel
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        let dest_x = x * scale + sx;
+                        let dest_y = y * scale + sy;
+                        buffer[dest_y * (SCREEN_WIDTH * scale) + dest_x] = color;
+                    }
+                }
+            }
+        }
+
+        // Update window
+        window
+            .update_with_buffer(&buffer, SCREEN_WIDTH * scale, SCREEN_HEIGHT * scale)
+            .expect("Failed to update window");
+
+        frame_count += 1;
+
+        if debug && frame_count % 60 == 0 {
+            let elapsed = start_time.elapsed().as_secs_f64();
+            let fps = frame_count as f64 / elapsed;
+            println!(
+                "[Frame {}] FPS: {:.1}, Cycles: {}, LY: {}",
+                frame_count, fps, emu.cycles, emu.bus.ppu.ly
+            );
+        }
+    }
+
+    println!("\n--- GUI Closed ---");
+    println!("  Frames: {}", frame_count);
+    println!("  Cycles: {}", emu.cycles);
 }
 
 fn run_demo() {

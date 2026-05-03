@@ -16,9 +16,12 @@ cargo test <test_name>   # Run a single test
 cargo clippy             # Run linter
 cargo fmt                # Format code
 
-# Run with ROM
+# Run with ROM (CLI mode - for test ROMs)
 cargo run -- path/to/rom.gb --run
 cargo run -- path/to/rom.gb --run --debug
+
+# Run with ROM (GUI mode - graphical display)
+cargo run --release -- path/to/rom.gb --gui
 ```
 
 ## Reference Documentation
@@ -38,7 +41,7 @@ cargo run -- path/to/rom.gb --run --debug
 
 ```
 src/
-├── main.rs          # CLI entry point
+├── main.rs          # CLI entry point, GUI display
 ├── lib.rs           # Library exports
 ├── bus.rs           # Memory bus (address mapping)
 ├── cpu/
@@ -46,9 +49,18 @@ src/
 │   ├── registers.rs # CPU registers (A,F,B,C,D,E,H,L,SP,PC)
 │   ├── instructions.rs    # Base opcodes (0x00-0xFF)
 │   └── cb_instructions.rs # CB-prefixed opcodes
+├── ppu/
+│   ├── mod.rs       # PPU structure and rendering
+│   └── registers.rs # LCDC, STAT registers
 ├── cartridge.rs     # ROM loading and header parsing
 ├── emulator.rs      # Main emulation loop
 ├── interrupts.rs    # Interrupt handling
+├── joypad.rs        # Joypad input (0xFF00)
+├── mbc/
+│   ├── mod.rs       # MBC trait and factory
+│   ├── no_mbc.rs    # ROM-only cartridges
+│   ├── mbc1.rs      # MBC1 (up to 2MB ROM, 32KB RAM)
+│   └── mbc3.rs      # MBC3 (up to 2MB ROM, 32KB RAM, RTC)
 └── timer.rs         # Timer (DIV, TIMA, TMA, TAC)
 ```
 
@@ -95,10 +107,44 @@ src/
 ### Serial ✅
 - Basic serial output capture (for test ROMs)
 
+### PPU ✅
+- 160×144 pixel display (4 shades of gray)
+- Background layer with scrolling (SCX, SCY)
+- Window layer (WX, WY)
+- Sprite rendering (8×8 and 8×16 modes)
+- OAM with 40 sprites, 10 per scanline limit
+- DMA transfer (0xFF46)
+- PPU modes (OAM Scan, Drawing, HBlank, VBlank)
+- V-Blank and LCD STAT interrupts
+- LCDC register (0xFF40)
+- STAT register (0xFF41)
+- Palettes (BGP, OBP0, OBP1)
+- VRAM/OAM access restrictions during rendering
+
+### Display Frontend ✅
+- minifb window with 3x scale (480×432 pixels)
+- Classic Game Boy green palette
+- 60 FPS target
+
+### Joypad ✅
+- 8 buttons: D-pad (Right, Left, Up, Down), A, B, Start, Select
+- Register 0xFF00 with button group selection
+- Joypad interrupt (bit 4)
+- Keyboard mapping:
+  - Arrow keys → D-pad
+  - Z → A, X → B
+  - Enter → Start, Backspace → Select
+  - Escape → Quit
+
+### MBC (Memory Bank Controller) ✅
+- ROM-only cartridges (no banking)
+- MBC1: Up to 2MB ROM (125 banks), 32KB RAM (4 banks)
+- MBC3: Up to 2MB ROM (128 banks), 32KB RAM, RTC registers
+- Automatic MBC type detection from cartridge header
+- RAM enable/disable control
+
 ## Not Yet Implemented
 
-- **PPU**: Graphics rendering (background, window, sprites)
 - **APU**: Audio (4 channels)
-- **Joypad**: Input handling
-- **MBC**: Bank switching (MBC1, MBC3, MBC5)
+- **MBC5**: Up to 8MB ROM, 128KB RAM (larger games)
 - **CGB**: Color Game Boy features

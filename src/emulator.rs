@@ -18,8 +18,11 @@ pub struct Emulator {
 impl Emulator {
     /// Create a new emulator with a loaded cartridge
     pub fn new(cartridge: &Cartridge) -> Self {
-        let mut bus = Bus::new();
-        bus.load_rom(&cartridge.rom);
+        let bus = Bus::with_cartridge(
+            cartridge.info.cartridge_type_byte,
+            cartridge.rom.clone(),
+            cartridge.info.ram_size,
+        );
 
         Self {
             cpu: Cpu::new(),

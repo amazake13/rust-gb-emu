@@ -7,4 +7,7 @@ pub mod cartridge;
 pub mod cpu;
 pub mod emulator;
 pub mod interrupts;
+pub mod joypad;
+pub mod mbc;
+pub mod ppu;
 pub mod timer;

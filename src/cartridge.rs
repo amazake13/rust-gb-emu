@@ -69,6 +69,7 @@ impl From<u8> for CartridgeType {
 pub struct CartridgeInfo {
     pub title: String,
     pub cartridge_type: CartridgeType,
+    pub cartridge_type_byte: u8,
     pub rom_size: usize,
     pub ram_size: usize,
     pub header_checksum: u8,
@@ -115,7 +116,8 @@ impl Cartridge {
             .collect::<String>();
 
         // Cartridge type (0x0147)
-        let cartridge_type = CartridgeType::from(rom[0x0147]);
+        let cartridge_type_byte = rom[0x0147];
+        let cartridge_type = CartridgeType::from(cartridge_type_byte);
 
         // ROM size (0x0148): 32KB << value
         let rom_size = match rom[0x0148] {
@@ -157,6 +159,7 @@ impl Cartridge {
         Ok(CartridgeInfo {
             title,
             cartridge_type,
+            cartridge_type_byte,
             rom_size,
             ram_size,
             header_checksum,
